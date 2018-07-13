@@ -27,12 +27,19 @@ import (
 
 // ELBV2svc is a pointer to the awsutil ELBV2 service
 var ELBV2svc ELBV2API
+var logger *log.Logger
+
+func init() {
+	logger = log.New("elbv2")
+}
 
 const (
 	// Amount of time between each deletion attempt (or reattempt) for a target group
 	deleteTargetGroupReattemptSleep int = 10
 	// Maximum attempts should be made to delete a target group
 	deleteTargetGroupReattemptMax int = 10
+
+	maxDescribeARNs int = 20
 
 	DescribeTargetGroupTargetsForArnCache string = "ELBV2-DescribeTargetGroupTargetsForArn"
 )
@@ -270,25 +277,30 @@ func (e *ELBV2) RemoveTargetGroup(arn *string) error {
 // ClusterLoadBalancers looks up all ELBV2 (ALB) instances in AWS that are part of the cluster.
 func (e *ELBV2) ClusterLoadBalancers(rgt *albrgt.Resources) ([]*elbv2.LoadBalancer, error) {
 	var loadbalancers []*elbv2.LoadBalancer
-
-	p := request.Pagination{
-		NewRequest: func() (*request.Request, error) {
-			req, _ := e.DescribeLoadBalancersRequest(&elbv2.DescribeLoadBalancersInput{})
-			return req, nil
-		},
+	loadBalancerARNs := make([]*string, 0, len(rgt.LoadBalancers))
+	for k := range rgt.LoadBalancers {
+		loadBalancerARNs = append(loadBalancerARNs, aws.String(k))
 	}
 
-	for p.Next() {
-		page := p.Page().(*elbv2.DescribeLoadBalancersOutput)
-
-		for _, loadBalancer := range page.LoadBalancers {
+	arnChunks := util.Chunk(loadBalancerARNs, maxDescribeARNs)
+	for _, arnChunk := range arnChunks {
+		for _, arn := range arnChunk {
+			logger.Debugf("Using ARN %v", aws.StringValue(arn))
+		}
+		resp, err := e.DescribeLoadBalancers(&elbv2.DescribeLoadBalancersInput{
+			LoadBalancerArns: arnChunk,
+		})
+		if err != nil {
+			return loadbalancers, err
+		}
+		for _, loadBalancer := range resp.LoadBalancers {
 			if _, ok := rgt.LoadBalancers[*loadBalancer.LoadBalancerArn]; ok {
 				loadbalancers = append(loadbalancers, loadBalancer)
 			}
 		}
 	}
 
-	return loadbalancers, p.Err()
+	return loadbalancers, nil
 }
 
 // ClusterTargetGroups fetches all target groups that are part of the cluster.

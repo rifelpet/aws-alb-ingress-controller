@@ -40,3 +40,18 @@ func (a AWSStringSlice) Hash() string {
 	output := hex.EncodeToString(hasher.Sum(nil))
 	return output
 }
+
+// Chunk breaks apart an AWSStringSlice into slices of a certain size
+func Chunk(s AWSStringSlice, size int) []AWSStringSlice {
+	var chunks = make([]AWSStringSlice, 0, 0)
+	chunkSize := (len(s) + size - 1) / size
+
+	for i := 0; i < len(s); i += chunkSize {
+		end := i + chunkSize
+		if end > len(s) {
+			end = len(s)
+		}
+		chunks = append(chunks, s[i:end])
+	}
+	return chunks
+}
